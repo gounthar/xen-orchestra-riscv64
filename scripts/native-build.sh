@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # On a native riscv64 runner (RISE ubuntu-24.04-riscv), from the XO checkout: install, build
-# xo-server and XO 6 (vite only: its vue-tsc type-check runs in the QEMU build and emits no
+# xo-server, xo-lib (the one workspace dependency of xo-web, which only builds under QEMU) and
+# XO 6 (vite only: its vue-tsc type-check runs in the QEMU build and emits no
 # files), then require the outputs to match the QEMU build byte for byte. Node on riscv64 has
 # a heap-corruption bug on real hardware, so a native build that finishes is not trusted on
 # its own. Failed workspace builds are retried once under --predictable.
@@ -18,7 +19,7 @@ chmod +x "$pred/bin/node"
 export PREDICTABLE_SHIM=$pred/bin BUILT_LIST=$logs/built-workspaces
 CXXFLAGS=-DLEVELDB_ATOMIC_PRESENT /usr/bin/time -v yarn 2>&1 | tee "$logs/install.log" | tail -3
 "$ci/install-bindings.sh" . "$bindings" | tee "$logs/bindings.log"
-/usr/bin/time -v node "$ci/build-deps.mjs" xo-server @vates/fuse-vhd 2>&1 | tee "$logs/server.log" | grep '^BUILD\|Elapsed'
+/usr/bin/time -v node "$ci/build-deps.mjs" xo-server @vates/fuse-vhd xo-lib 2>&1 | tee "$logs/server.log" | grep '^BUILD\|Elapsed'
 ( cd @xen-orchestra/web && /usr/bin/time -v yarn run build-only ) 2>&1 | tee "$logs/xo6.log" | tail -3
 "$ci/manifest.sh" > "$logs/native.sha256"
 if cmp -s "$ref" "$logs/native.sha256"; then
