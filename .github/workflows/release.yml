@@ -1,0 +1,224 @@
+---
+name: riscv64 release
+# Builds each upstream Xen Orchestra release for riscv64 and publishes the complete,
+# ready-to-run tree as riscv64-vX.Y.Z. Upstream marks releases with "feat: release X.Y.Z"
+# commits on vatesfr/xen-orchestra master (no tags), so a daily check looks for new ones.
+#
+# Hybrid build:
+#   bindings  x86: cross-compile rolldown and lightningcss riscv64 napi bindings (npm ships none)
+#   xo5       x86 + QEMU user-mode: xo-web, which crashes V8 on native riscv64 hardware
+#   native    RISE riscv64 runner: install, xo-server, XO 6, assemble, test, release
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Upstream version to build (X.Y.Z); empty = newest release'
+        required: false
+      force:
+        description: 'Rebuild even if the release already exists'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: riscv64-release
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.find.outputs.version }}
+      sha: ${{ steps.find.outputs.sha }}
+      build: ${{ steps.find.outputs.build }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WANT: ${{ inputs.version }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          if [ -n "$WANT" ]; then
+            tmp=$(mktemp -d)
+            git clone -q --filter=blob:none --no-checkout -b master \
+              https://github.com/vatesfr/xen-orchestra.git "$tmp"
+            sha=$(git -C "$tmp" log -1 -F --grep="feat: release $WANT" --format=%H)
+            version=$WANT
+            [ -n "$sha" ] || { echo "no release commit for $WANT"; exit 1; }
+          else
+            read -r version sha < <(scripts/detect-release.sh)
+          fi
+          echo "upstream release $version at $sha"
+          build=true
+          if gh release view "riscv64-v$version" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+             && [ "$FORCE" != true ]; then
+            echo "riscv64-v$version already released"; build=false
+          fi
+          { echo "version=$version"; echo "sha=$sha"; echo "build=$build"; } >> "$GITHUB_OUTPUT"
+
+  bindings:
+    needs: detect
+    if: needs.detect.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Fetch the release lockfile
+        run: |
+          curl -fsSL -o yarn.lock \
+            "https://raw.githubusercontent.com/vatesfr/xen-orchestra/${{ needs.detect.outputs.sha }}/yarn.lock"
+          { scripts/lockfile-versions.sh yarn.lock rolldown | sed 's/^/rolldown /'
+            scripts/lockfile-versions.sh yarn.lock lightningcss | sed 's/^/lightningcss /'
+          } | tee versions.txt
+      - uses: actions/cache@v6.1.0
+        with:
+          path: bindings
+          key: bindings-riscv64-${{ hashFiles('versions.txt', 'scripts/cross-bindings.sh') }}
+      - name: Cross-compile the bindings
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-riscv64-linux-gnu g++-riscv64-linux-gnu cmake file
+          scripts/cross-bindings.sh yarn.lock bindings
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: bindings
+          path: bindings
+
+  xo5:
+    needs: detect
+    if: needs.detect.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          path: ci
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: vatesfr/xen-orchestra
+          ref: ${{ needs.detect.outputs.sha }}
+          path: src
+      - uses: docker/setup-qemu-action@v4.4.0
+        with:
+          platforms: riscv64
+      - name: Build xo-web in a riscv64 container (QEMU)
+        run: |
+          mkdir -p ci/logs
+          docker run --rm --platform linux/riscv64 \
+            -v "$PWD/src:/xo" -v "$PWD/ci:/ci" -w /xo ubuntu:24.04 \
+            bash /ci/scripts/qemu-xo5.sh
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: xo5-dist
+          path: src/packages/xo-web/dist
+      - if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: logs-xo5
+          path: ci/logs
+
+  native:
+    needs: [detect, bindings, xo5]
+    runs-on: ubuntu-24.04-riscv
+    timeout-minutes: 300
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.detect.outputs.version }}
+      SHA: ${{ needs.detect.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          path: ci
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: vatesfr/xen-orchestra
+          ref: ${{ needs.detect.outputs.sha }}
+          path: src
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '22.23'
+      - name: System packages and yarn
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libfuse-dev pkg-config zstd time
+          sudo env "PATH=$PATH" corepack enable
+          corepack prepare yarn@1.22.22 --activate
+          node -p "[process.arch, process.version, process.versions.v8].join(' ')"
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: bindings
+          path: bindings
+      - name: Install XO, build xo-server and XO 6
+        working-directory: src
+        run: ../ci/scripts/native-build.sh ../bindings ../logs
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: xo5-dist
+          path: src/packages/xo-web/dist
+      - name: Check the assembled tree
+        working-directory: src
+        run: |
+          test -s packages/xo-server/dist/cli.mjs
+          test -s packages/xo-web/dist/index.js
+          test -s @xen-orchestra/web/dist/index.html
+          for m in rolldown lightningcss fuse-native argon2 leveldown; do
+            node -e "require('$m'); console.log('$m loads')"
+          done
+      - name: Package
+        run: |
+          name=xen-orchestra-$VERSION-linux-riscv64
+          cat > src/RISCV64-BUILD.txt <<INFO
+          Xen Orchestra $VERSION built for linux/riscv64 by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY
+          Upstream source: https://github.com/vatesfr/xen-orchestra/tree/$SHA
+          Build run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+          Node used: $(node -v) (runtime needs Node >= 22.23 on riscv64)
+          xo-server, XO 6: native riscv64 (RISE runner). xo-web (XO 5): riscv64 under QEMU.
+          INFO
+          tar --exclude=.git -C src --transform "s,^\.,$name," -cf - . | zstd -T0 -12 -o "$name.tar.zst"
+          sha256sum "$name.tar.zst" > "$name.tar.zst.sha256"
+          ls -l "$name".tar.zst*
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          name=xen-orchestra-$VERSION-linux-riscv64
+          cat > notes.md <<NOTES
+          Xen Orchestra $VERSION for linux/riscv64: a complete, built source tree (xo-server, XO 5 and XO 6 UIs, node_modules).
+
+          - Upstream: [vatesfr/xen-orchestra@${SHA:0:10}](https://github.com/vatesfr/xen-orchestra/tree/$SHA), unmodified except for the riscv64 rolldown and lightningcss bindings added to node_modules.
+          - Needs Node >= 22.23 for riscv64 (e.g. unofficial-builds.nodejs.org) and libfuse2.
+          - Start: \`node packages/xo-server/dist/cli.mjs\` with a config based on \`packages/xo-server/sample.config.toml\`.
+          - Build log: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+
+          Community build, not supported by Vates.
+          NOTES
+          gh release delete "riscv64-v$VERSION" -R "$GITHUB_REPOSITORY" -y --cleanup-tag 2>/dev/null || true
+          gh release create "riscv64-v$VERSION" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Xen Orchestra $VERSION (riscv64)" --notes-file notes.md \
+            "$name.tar.zst" "$name.tar.zst.sha256"
+      - name: Delete releases older than 90 days
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Runs only after a successful release, and never touches the one just made.
+          cutoff=$(date -u -d '90 days ago' +%s)
+          gh release list -R "$GITHUB_REPOSITORY" --limit 200 --json tagName,createdAt \
+            --jq '.[] | select(.tagName | startswith("riscv64-v")) | "\(.tagName) \(.createdAt)"' |
+          while read -r tag created; do
+            [ "$tag" = "riscv64-v$VERSION" ] && continue
+            if [ "$(date -u -d "$created" +%s)" -lt "$cutoff" ]; then
+              echo "deleting $tag (created $created)"
+              gh release delete "$tag" -R "$GITHUB_REPOSITORY" -y --cleanup-tag
+            fi
+          done
+      - if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: logs-native
+          path: logs

@@ -1,0 +1,6 @@
+bindings/
+logs/
+src/
+ci/
+versions.txt
+yarn.lock
