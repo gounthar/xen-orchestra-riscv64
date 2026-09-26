@@ -14,11 +14,18 @@ x86-64 libfuse and cannot build on riscv64 ([scripts/patch-source.sh](scripts/pa
 Upstream marks each release with a `feat: release X.Y.Z` commit on `master`. A daily workflow
 ([release.yml](.github/workflows/release.yml)) looks for a new one and builds it:
 
-| part | where | why |
+| step | where | why |
 |---|---|---|
 | rolldown and lightningcss napi bindings | x86, cross-compiled at the lockfile's versions | npm ships no riscv64 binaries for them |
-| xo-web (XO 5) | x86 runner, riscv64 container under QEMU user-mode | on native riscv64 hardware the build crashes V8 (heap corruption in the gulp/browserify step); under QEMU it completes |
-| install, xo-server, XO 6, packaging | native riscv64 ([RISE](https://riseproject.dev) runner `ubuntu-24.04-riscv`) | |
+| full build: xo-server, xo-web (XO 5), XO 6 | x86 runner, riscv64 container under QEMU user-mode | reference build; xo-web only builds here |
+| xo-server and XO 6 again | native riscv64 ([RISE](https://riseproject.dev) runner `ubuntu-24.04-riscv`) | real-hardware build |
+| check | native runner | every output file must be byte-identical to the QEMU build, or nothing is released |
+| package, release, prune | native runner | complete tree, sha256, releases older than 90 days deleted |
+
+Why the check: Node.js on real riscv64 hardware (seen on SpaceMiT K1 and on the RISE runners, Node 22 to
+27-pre) corrupts its own heap during some large builds. Usually that crashes, sometimes it only throws
+nonsense errors, and nothing guarantees a build that finishes is correct. The same builds under QEMU have
+always completed, and the outputs are reproducible, so the QEMU build is the reference.
 
 Riscv64-specific build settings: `CXXFLAGS=-DLEVELDB_ATOMIC_PRESENT` (leveldb 1.20 in leveldown has
 no riscv64 AtomicPointer), `libfuse-dev` for fuse-native, and a single retry under
