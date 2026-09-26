@@ -5,7 +5,9 @@ one per upstream release. Not affiliated with or supported by Vates.
 
 Each [release](../../releases) (kept for 90 days, the newest always kept) is a complete, built source tree: xo-server, the XO 5 (`xo-web`) and
 XO 6 (`@xen-orchestra/web`) UIs, and `node_modules` with riscv64 native addons. The source is
-upstream's, unmodified, at the commit named in the release notes.
+upstream's at the commit named in the release notes, with one source change: `fuse-native` is aliased to
+[`@cocalc/fuse-native`](https://www.npmjs.com/package/@cocalc/fuse-native), because the original links a bundled
+x86-64 libfuse and cannot build on riscv64 ([scripts/patch-source.sh](scripts/patch-source.sh)).
 
 ## How it is built
 

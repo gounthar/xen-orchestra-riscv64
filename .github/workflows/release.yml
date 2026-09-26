@@ -109,6 +109,7 @@ jobs:
       - name: Build xo-web in a riscv64 container (QEMU)
         run: |
           mkdir -p ci/logs
+          (cd src && ../ci/scripts/patch-source.sh)
           docker run --rm --platform linux/riscv64 \
             -v "$PWD/src:/xo" -v "$PWD/ci:/ci" -w /xo ubuntu:24.04 \
             bash /ci/scripts/qemu-xo5.sh
@@ -156,7 +157,9 @@ jobs:
           path: bindings
       - name: Install XO, build xo-server and XO 6
         working-directory: src
-        run: ../ci/scripts/native-build.sh ../bindings ../logs
+        run: |
+          ../ci/scripts/patch-source.sh
+          ../ci/scripts/native-build.sh ../bindings ../logs
       - uses: actions/download-artifact@v8.0.1
         with:
           name: xo5-dist
@@ -170,6 +173,7 @@ jobs:
           for m in rolldown lightningcss fuse-native argon2 leveldown; do
             node -e "require('$m'); console.log('$m loads')"
           done
+          node -p "'fuse-native is ' + require('fuse-native/package.json').name + '@' + require('fuse-native/package.json').version"
       - name: Package
         run: |
           name=xen-orchestra-$VERSION-linux-riscv64
@@ -191,7 +195,7 @@ jobs:
           cat > notes.md <<NOTES
           Xen Orchestra $VERSION for linux/riscv64: a complete, built source tree (xo-server, XO 5 and XO 6 UIs, node_modules).
 
-          - Upstream: [vatesfr/xen-orchestra@${SHA:0:10}](https://github.com/vatesfr/xen-orchestra/tree/$SHA), unmodified except for the riscv64 rolldown and lightningcss bindings added to node_modules.
+          - Upstream: [vatesfr/xen-orchestra@${SHA:0:10}](https://github.com/vatesfr/xen-orchestra/tree/$SHA), unmodified except for two riscv64 changes: rolldown and lightningcss bindings added to node_modules, and fuse-native aliased to @cocalc/fuse-native (the original links a bundled x86-64 libfuse).
           - Needs Node >= 22.23 for riscv64 (e.g. unofficial-builds.nodejs.org) and libfuse2.
           - Start: \`node packages/xo-server/dist/cli.mjs\` with a config based on \`packages/xo-server/sample.config.toml\`.
           - Build log: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
