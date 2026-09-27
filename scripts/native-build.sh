@@ -22,6 +22,7 @@ install() { CXXFLAGS=-DLEVELDB_ATOMIC_PRESENT /usr/bin/time -v yarn 2>&1 | tee -
 # on number '48'"), so a failed install is retried once under --predictable.
 install || { echo "install failed, retrying under --predictable"; PATH="$pred/bin:$PATH" install; }
 "$ci/install-bindings.sh" . "$bindings" | tee "$logs/bindings.log"
+"$ci/patch-node-modules.sh" | tee -a "$logs/bindings.log"
 /usr/bin/time -v node "$ci/build-deps.mjs" xo-server @vates/fuse-vhd xo-lib $("$ci/plugins.sh") 2>&1 | tee "$logs/server.log" | grep '^BUILD\|Elapsed'
 ( cd @xen-orchestra/web && /usr/bin/time -v yarn run build-only ) 2>&1 | tee "$logs/xo6.log" | tail -3
 "$ci/manifest.sh" > "$logs/native.sha256"

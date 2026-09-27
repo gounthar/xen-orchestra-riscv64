@@ -8,6 +8,9 @@ XO 6 (`@xen-orchestra/web`) UIs, and `node_modules` with riscv64 native addons. 
 upstream's at the commit named in the release notes, with one source change: `fuse-native` is aliased to
 [`@cocalc/fuse-native`](https://www.npmjs.com/package/@cocalc/fuse-native), because the original links a bundled
 x86-64 libfuse and cannot build on riscv64 ([scripts/patch-source.sh](scripts/patch-source.sh)).
+One build tool is also patched after install: `index-modules` sorts its directory listing, so
+xo-server's generated module indexes come out in the same order on every machine
+([scripts/patch-node-modules.sh](scripts/patch-node-modules.sh)); this only changes import order.
 
 ## How it is built
 
