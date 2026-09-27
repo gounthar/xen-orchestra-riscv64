@@ -34,6 +34,15 @@ Riscv64-specific build settings: `CXXFLAGS=-DLEVELDB_ATOMIC_PRESENT` (leveldb 1.
 no riscv64 AtomicPointer), `libfuse-dev` for fuse-native, and a single retry under
 `node --predictable` for workspace builds that hit V8 crashes.
 
+## Known issue: Node.js on riscv64 hardware
+
+Node.js corrupts its own heap now and then on real riscv64 hardware (seen on SpaceMiT K1 and on the
+EM-RV1 machines behind the RISE runners, Node 22 through 27-pre). During builds this is why every
+output is checked against a QEMU build. At runtime it can also hit xo-server: one CI start crashed in
+`node-openssl-cert` with a nonsense "Received type number (63)" error before the UIs were mounted.
+Other starts, including three on a K1 board, came up fine. If xo-server dies with an error like that,
+restart it. Not yet reported upstream: no small reproducer yet.
+
 ## Running it
 
 Needs Node.js >= 22.23 for riscv64 ([unofficial-builds](https://unofficial-builds.nodejs.org/download/release/))
