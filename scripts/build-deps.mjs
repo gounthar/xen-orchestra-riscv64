@@ -47,9 +47,13 @@ for (const name of order) {
   const start = Date.now()
   let status = build(location)
   let how = ''
-  if (status !== 0 && shim !== undefined) {
+  // RETRIES: attempts under --predictable after a failure (default 1). On riscv64 the
+  // failures are Node heap corruption, not build errors, and the outputs are verified
+  // against a QEMU build afterwards, so retrying is safe.
+  const retries = Number(process.env.RETRIES ?? 1)
+  for (let i = 1; status !== 0 && shim !== undefined && i <= retries; i++) {
     status = build(location, { ...process.env, PATH: `${shim}:${process.env.PATH}` })
-    how = status === 0 ? ' [only with --predictable]' : ' [also with --predictable]'
+    how = status === 0 ? ` [only with --predictable, attempt ${i}]` : ` [also with --predictable x${i}]`
   }
   const secs = Math.round((Date.now() - start) / 1000)
   console.log(`BUILD ${status === 0 ? 'ok  ' : 'FAIL'} ${name} (${secs}s)${how}`)

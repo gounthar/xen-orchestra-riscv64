@@ -16,7 +16,7 @@ pred=$RUNNER_TEMP/node-predictable
 cp -a "$real" "$pred"; mv "$pred/bin/node" "$pred/bin/node-real"
 printf '#!/bin/sh\nexec "$(dirname "$0")/node-real" --predictable "$@"\n' > "$pred/bin/node"
 chmod +x "$pred/bin/node"
-export PREDICTABLE_SHIM=$pred/bin BUILT_LIST=$logs/built-workspaces
+export PREDICTABLE_SHIM=$pred/bin BUILT_LIST=$logs/built-workspaces RETRIES=3
 install() { CXXFLAGS=-DLEVELDB_ATOMIC_PRESENT /usr/bin/time -v yarn 2>&1 | tee -a "$logs/install.log" | tail -3; }
 # yarn itself has hit the heap corruption (run 36277817399: "Cannot create property 'onDone'
 # on number '48'"), so a failed install is retried once under --predictable.
