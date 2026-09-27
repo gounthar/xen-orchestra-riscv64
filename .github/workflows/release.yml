@@ -159,7 +159,7 @@ jobs:
       - name: System packages and yarn
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libfuse-dev pkg-config zstd time
+          sudo apt-get install -y -qq libfuse-dev pkg-config zstd time redis-server
           sudo env "PATH=$PATH" corepack enable
           corepack prepare yarn@1.22.22 --activate
           node -p "[process.arch, process.version, process.versions.v8].join(' ')"
@@ -200,9 +200,14 @@ jobs:
           Node used: $(node -v) (runtime needs Node >= 22.23 on riscv64)
           xo-server, XO 6: native riscv64 (RISE runner), byte-identical to a QEMU build. xo-web (XO 5): QEMU.
           INFO
-          tar --exclude=.git -C src --transform "s,^\.,$name," -cf - . | zstd -T0 -12 -o "$name.tar.zst"
+          # a plain rename: tar --transform also rewrote the relative targets of the
+          # workspace symlinks in node_modules, which broke riscv64-v6.8.2's first upload
+          mv src "$name"
+          tar --exclude=.git -cf - "$name" | zstd -T0 -12 -o "$name.tar.zst"
           sha256sum "$name.tar.zst" > "$name.tar.zst.sha256"
           ls -l "$name".tar.zst*
+      - name: Start the packaged tree and log in
+        run: ci/scripts/smoke-test.sh "xen-orchestra-$VERSION-linux-riscv64.tar.zst"
       - name: Release
         env:
           GH_TOKEN: ${{ github.token }}

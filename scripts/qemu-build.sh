@@ -17,7 +17,7 @@ export BUILT_LIST=/logs/built-workspaces
 CXXFLAGS=-DLEVELDB_ATOMIC_PRESENT /usr/bin/time -v yarn 2>&1 | tee /logs/install.log | tail -3
 /ci/scripts/install-bindings.sh . /bindings | tee /logs/bindings.log
 b() { /usr/bin/time -v node /ci/scripts/build-deps.mjs "$@" 2>&1 | tee -a /logs/build.log | grep '^BUILD\|Elapsed'; }
-b xo-server @vates/fuse-vhd
+b xo-server @vates/fuse-vhd $(/ci/scripts/plugins.sh)
 b xo-web
 b @xen-orchestra/web
 test -s packages/xo-web/dist/index.js
