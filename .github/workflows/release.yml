@@ -6,8 +6,11 @@ name: riscv64 release
 #
 # Hybrid build:
 #   bindings  x86: cross-compile rolldown and lightningcss riscv64 napi bindings (npm ships none)
-#   xo5       x86 + QEMU user-mode: xo-web, which crashes V8 on native riscv64 hardware
-#   native    RISE riscv64 runner: install, xo-server, XO 6, assemble, test, release
+#   qemu      x86 + QEMU user-mode: full build (xo-server, xo-web, XO 6) and a hash manifest.
+#             xo-web crashes V8 on native riscv64 hardware, so XO 5 comes from here.
+#   native    RISE riscv64 runner: xo-server and XO 6 again; must match the QEMU manifest
+#             byte for byte (Node's riscv64 heap corruption can fail silently); then
+#             assemble, test, release, and delete releases older than 90 days
 on:
   schedule:
     - cron: '17 5 * * *'
@@ -89,9 +92,8 @@ jobs:
           name: bindings
           path: bindings
 
-  xo5:
-    needs: detect
-    if: needs.detect.outputs.build == 'true'
+  qemu:
+    needs: [detect, bindings]
     runs-on: ubuntu-24.04
     timeout-minutes: 330
     steps:
@@ -103,27 +105,38 @@ jobs:
           repository: vatesfr/xen-orchestra
           ref: ${{ needs.detect.outputs.sha }}
           path: src
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: bindings
+          path: bindings
       - uses: docker/setup-qemu-action@v4.4.0
         with:
           platforms: riscv64
-      - name: Build xo-web in a riscv64 container (QEMU)
+      - name: Full build in a riscv64 container (QEMU)
         run: |
-          mkdir -p ci/logs
+          mkdir -p logs
+          (cd src && ../ci/scripts/patch-source.sh)
+          # src is mounted at the path the native runner uses, so path-bearing outputs compare
           docker run --rm --platform linux/riscv64 \
-            -v "$PWD/src:/xo" -v "$PWD/ci:/ci" -w /xo ubuntu:24.04 \
-            bash /ci/scripts/qemu-xo5.sh
+            -v "$PWD/src:$GITHUB_WORKSPACE/src" -w "$GITHUB_WORKSPACE/src" \
+            -v "$PWD/ci:/ci" -v "$PWD/bindings:/bindings" -v "$PWD/logs:/logs" \
+            ubuntu:24.04 bash /ci/scripts/qemu-build.sh
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: xo5-dist
           path: src/packages/xo-web/dist
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: qemu-manifest
+          path: logs/qemu.sha256
       - if: always()
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: logs-xo5
-          path: ci/logs
+          name: logs-qemu
+          path: logs
 
   native:
-    needs: [detect, bindings, xo5]
+    needs: [detect, bindings, qemu]
     runs-on: ubuntu-24.04-riscv
     timeout-minutes: 300
     permissions:
@@ -146,7 +159,7 @@ jobs:
       - name: System packages and yarn
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libfuse-dev pkg-config zstd time
+          sudo apt-get install -y -qq libfuse-dev pkg-config zstd time redis-server
           sudo env "PATH=$PATH" corepack enable
           corepack prepare yarn@1.22.22 --activate
           node -p "[process.arch, process.version, process.versions.v8].join(' ')"
@@ -154,9 +167,15 @@ jobs:
         with:
           name: bindings
           path: bindings
-      - name: Install XO, build xo-server and XO 6
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: qemu-manifest
+          path: qemu-manifest
+      - name: Build xo-server and XO 6 natively, check against the QEMU build
         working-directory: src
-        run: ../ci/scripts/native-build.sh ../bindings ../logs
+        run: |
+          ../ci/scripts/patch-source.sh
+          ../ci/scripts/native-build.sh ../bindings ../logs ../qemu-manifest/qemu.sha256
       - uses: actions/download-artifact@v8.0.1
         with:
           name: xo5-dist
@@ -170,6 +189,7 @@ jobs:
           for m in rolldown lightningcss fuse-native argon2 leveldown; do
             node -e "require('$m'); console.log('$m loads')"
           done
+          node -p "'fuse-native is ' + require('fuse-native/package.json').name + '@' + require('fuse-native/package.json').version"
       - name: Package
         run: |
           name=xen-orchestra-$VERSION-linux-riscv64
@@ -178,11 +198,16 @@ jobs:
           Upstream source: https://github.com/vatesfr/xen-orchestra/tree/$SHA
           Build run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
           Node used: $(node -v) (runtime needs Node >= 22.23 on riscv64)
-          xo-server, XO 6: native riscv64 (RISE runner). xo-web (XO 5): riscv64 under QEMU.
+          xo-server, XO 6: native riscv64 (RISE runner), byte-identical to a QEMU build. xo-web (XO 5): QEMU.
           INFO
-          tar --exclude=.git -C src --transform "s,^\.,$name," -cf - . | zstd -T0 -12 -o "$name.tar.zst"
+          # a plain rename: tar --transform also rewrote the relative targets of the
+          # workspace symlinks in node_modules, which broke riscv64-v6.8.2's first upload
+          mv src "$name"
+          tar --exclude=.git -cf - "$name" | zstd -T0 -12 -o "$name.tar.zst"
           sha256sum "$name.tar.zst" > "$name.tar.zst.sha256"
           ls -l "$name".tar.zst*
+      - name: Start the packaged tree and log in
+        run: SMOKE_LOG="$GITHUB_WORKSPACE/logs/xo-server-smoke.log" ci/scripts/smoke-test.sh "xen-orchestra-$VERSION-linux-riscv64.tar.zst"
       - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -191,7 +216,7 @@ jobs:
           cat > notes.md <<NOTES
           Xen Orchestra $VERSION for linux/riscv64: a complete, built source tree (xo-server, XO 5 and XO 6 UIs, node_modules).
 
-          - Upstream: [vatesfr/xen-orchestra@${SHA:0:10}](https://github.com/vatesfr/xen-orchestra/tree/$SHA), unmodified except for the riscv64 rolldown and lightningcss bindings added to node_modules.
+          - Upstream: [vatesfr/xen-orchestra@${SHA:0:10}](https://github.com/vatesfr/xen-orchestra/tree/$SHA), unmodified except for two riscv64 changes: rolldown and lightningcss bindings added to node_modules, and fuse-native aliased to @cocalc/fuse-native (the original links a bundled x86-64 libfuse).
           - Needs Node >= 22.23 for riscv64 (e.g. unofficial-builds.nodejs.org) and libfuse2.
           - Start: \`node packages/xo-server/dist/cli.mjs\` with a config based on \`packages/xo-server/sample.config.toml\`.
           - Build log: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
