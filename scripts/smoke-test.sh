@@ -18,6 +18,10 @@ for _ in $(seq 1 120); do
 done
 stop() { kill "$(cat "$work/pid")" 2>/dev/null || true; }
 [ -n "$up" ] || { echo "xo-server did not come up"; tail -40 "$work/xo-server.log"; stop; exit 1; }
+# /signin answers before startup is over: the UI mounts are only set up after every plugin has
+# registered (run 36299491793 checked /v5/ mid-registration and got a 404). Wait for them.
+for _ in $(seq 1 120); do grep -q 'Setting up /v6' "$work/xo-server.log" && break; sleep 5; done
+grep -a 'Setting up /v' "$work/xo-server.log" | sed 's/.*Setting up/Setting up/' | cut -c1-80 || true
 jar=$work/cookies
 curl -s -c "$jar" -b "$jar" -o /dev/null -d 'username=admin%40admin.net&password=admin' http://127.0.0.1:8088/signin/local
 check() { # check <path> <min-bytes>
