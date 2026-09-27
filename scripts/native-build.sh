@@ -17,7 +17,10 @@ cp -a "$real" "$pred"; mv "$pred/bin/node" "$pred/bin/node-real"
 printf '#!/bin/sh\nexec "$(dirname "$0")/node-real" --predictable "$@"\n' > "$pred/bin/node"
 chmod +x "$pred/bin/node"
 export PREDICTABLE_SHIM=$pred/bin BUILT_LIST=$logs/built-workspaces
-CXXFLAGS=-DLEVELDB_ATOMIC_PRESENT /usr/bin/time -v yarn 2>&1 | tee "$logs/install.log" | tail -3
+install() { CXXFLAGS=-DLEVELDB_ATOMIC_PRESENT /usr/bin/time -v yarn 2>&1 | tee -a "$logs/install.log" | tail -3; }
+# yarn itself has hit the heap corruption (run 36277817399: "Cannot create property 'onDone'
+# on number '48'"), so a failed install is retried once under --predictable.
+install || { echo "install failed, retrying under --predictable"; PATH="$pred/bin:$PATH" install; }
 "$ci/install-bindings.sh" . "$bindings" | tee "$logs/bindings.log"
 /usr/bin/time -v node "$ci/build-deps.mjs" xo-server @vates/fuse-vhd xo-lib 2>&1 | tee "$logs/server.log" | grep '^BUILD\|Elapsed'
 ( cd @xen-orchestra/web && /usr/bin/time -v yarn run build-only ) 2>&1 | tee "$logs/xo6.log" | tail -3
