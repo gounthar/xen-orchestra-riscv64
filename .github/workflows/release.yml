@@ -207,7 +207,7 @@ jobs:
           sha256sum "$name.tar.zst" > "$name.tar.zst.sha256"
           ls -l "$name".tar.zst*
       - name: Start the packaged tree and log in
-        run: ci/scripts/smoke-test.sh "xen-orchestra-$VERSION-linux-riscv64.tar.zst"
+        run: SMOKE_LOG="$GITHUB_WORKSPACE/logs/xo-server-smoke.log" ci/scripts/smoke-test.sh "xen-orchestra-$VERSION-linux-riscv64.tar.zst"
       - name: Release
         env:
           GH_TOKEN: ${{ github.token }}

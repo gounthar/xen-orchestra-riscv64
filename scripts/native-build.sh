@@ -24,7 +24,8 @@ install || { echo "install failed, retrying under --predictable"; PATH="$pred/bi
 "$ci/install-bindings.sh" . "$bindings" | tee "$logs/bindings.log"
 "$ci/patch-node-modules.sh" | tee -a "$logs/bindings.log"
 /usr/bin/time -v node "$ci/build-deps.mjs" xo-server @vates/fuse-vhd xo-lib $("$ci/plugins.sh") 2>&1 | tee "$logs/server.log" | grep '^BUILD\|Elapsed'
-( cd @xen-orchestra/web && /usr/bin/time -v yarn run build-only ) 2>&1 | tee "$logs/xo6.log" | tail -3
+xo6() { ( cd @xen-orchestra/web && /usr/bin/time -v yarn run build-only ) 2>&1 | tee -a "$logs/xo6.log" | tail -3; }
+xo6 || { for i in 1 2 3; do echo "XO 6 build failed, retry $i under --predictable"; PATH="$pred/bin:$PATH" xo6 && break; [ "$i" = 3 ] && exit 1; done; }
 "$ci/manifest.sh" > "$logs/native.sha256"
 if cmp -s "$ref" "$logs/native.sha256"; then
   echo "native build matches the QEMU build: $(wc -l < "$ref") files"
