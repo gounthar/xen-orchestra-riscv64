@@ -219,7 +219,7 @@ jobs:
           - Upstream: [vatesfr/xen-orchestra@${SHA:0:10}](https://github.com/vatesfr/xen-orchestra/tree/$SHA), unmodified except for two riscv64 changes: rolldown and lightningcss bindings added to node_modules, and fuse-native aliased to @cocalc/fuse-native (the original links a bundled x86-64 libfuse).
           - Needs Node >= 22.23 for riscv64 (e.g. unofficial-builds.nodejs.org) and libfuse2.
           - Start: \`node packages/xo-server/dist/cli.mjs\` with a config based on \`packages/xo-server/sample.config.toml\`.
-          - On Sv39 boards such as the SpacemiT K1 (\`grep mmu /proc/cpuinfo\`), start Node with \`NODE_OPTIONS=--disable-wasm-trap-handler\`, or xo-server connects to no host: undici's WebAssembly HTTP parser cannot allocate memory (#2).
+          - If xo-server connects to no host and logs \`Cannot allocate Wasm memory\` (seen with 6.9.0 on a SpacemiT K1, an Sv39 board), start Node with \`NODE_OPTIONS=--disable-wasm-trap-handler\` (#2). It costs some WebAssembly speed, so only set it if you hit this.
           - Build log: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
 
           Community build, not supported by Vates.
