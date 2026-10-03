@@ -50,6 +50,22 @@ and libfuse2. Unpack, write a config from `packages/xo-server/sample.config.toml
 `node packages/xo-server/dist/cli.mjs`. See upstream's
 [install-from-sources documentation](https://docs.xen-orchestra.com/getting-started/install-from-sources).
 
+If xo-server starts but connects to no host, and every login fails with
+`WebAssembly.instantiate(): Out of memory: Cannot allocate Wasm memory` (raised by undici's
+WebAssembly HTTP parser), set `NODE_OPTIONS=--disable-wasm-trap-handler`. This was seen with 6.9.0
+on a SpacemiT K1, whose MMU is Sv39 (`grep mmu /proc/cpuinfo`); 6.8.2 did not hit it on the same
+board, and other Sv39 boards and releases are untested. Sv39 gives a process 256 GB of address space
+and V8 reserves large guard regions per WebAssembly memory unless its trap handler is off, which is
+the likely cause ([#2](https://github.com/gounthar/xen-orchestra-riscv64/issues/2)). The flag trades
+some WebAssembly speed for bounds checks, so only set it if you see the error. With systemd, as a
+drop-in:
+
+```ini
+# /etc/systemd/system/xo-server.service.d/wasm-sv39.conf
+[Service]
+Environment=NODE_OPTIONS=--disable-wasm-trap-handler
+```
+
 ## Licence
 
 Xen Orchestra is AGPL-3.0. The build scripts here are under the same licence.
