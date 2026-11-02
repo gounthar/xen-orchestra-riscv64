@@ -15,7 +15,9 @@ xo-server's generated module indexes come out in the same order on every machine
 ## How it is built
 
 Upstream marks each release with a `feat: release X.Y.Z` commit on `master`. A daily workflow
-([release.yml](.github/workflows/release.yml)) looks for a new one and builds it:
+([release.yml](.github/workflows/release.yml)) looks for a new one and builds it. The version
+it uses comes from `CHANGELOG.md` at that commit, not from the commit subject, which is typed by
+hand (upstream's 6.10.0 commit says `9.10.0`):
 
 | step | where | why |
 |---|---|---|
