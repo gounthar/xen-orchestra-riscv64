@@ -3,6 +3,7 @@ name: riscv64 release
 # Builds each upstream Xen Orchestra release for riscv64 and publishes the complete,
 # ready-to-run tree as riscv64-vX.Y.Z. Upstream marks releases with "feat: release X.Y.Z"
 # commits on vatesfr/xen-orchestra master (no tags), so a daily check looks for new ones.
+# The version itself comes from CHANGELOG.md at that commit (scripts/detect-release.sh).
 #
 # Hybrid build:
 #   bindings  x86: cross-compile rolldown and lightningcss riscv64 napi bindings (npm ships none)
@@ -46,17 +47,13 @@ jobs:
           WANT: ${{ inputs.version }}
           FORCE: ${{ inputs.force }}
         run: |
-          if [ -n "$WANT" ]; then
-            tmp=$(mktemp -d)
-            git clone -q --filter=blob:none --no-checkout -b master \
-              https://github.com/vatesfr/xen-orchestra.git "$tmp"
-            sha=$(git -C "$tmp" log -1 -F --grep="feat: release $WANT" --format=%H)
-            version=$WANT
-            [ -n "$sha" ] || { echo "no release commit for $WANT"; exit 1; }
-          else
-            read -r version sha < <(scripts/detect-release.sh)
-          fi
+          # Not `read < <(...)`: a process substitution hides the script's exit code
+          out=$(scripts/detect-release.sh "$WANT")
+          read -r version sha subject <<<"$out"
           echo "upstream release $version at $sha"
+          if [ "$subject" != "$version" ]; then
+            echo "::warning::upstream commit $sha says release $subject; CHANGELOG.md says $version, using $version"
+          fi
           build=true
           if gh release view "riscv64-v$version" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
              && [ "$FORCE" != true ]; then
