@@ -42,7 +42,12 @@ git clone -q --filter=blob:none --no-checkout --single-branch -b master "$repo" 
 # Read the whole file before parsing: `git show | grep -m1` dies of SIGPIPE under pipefail.
 changelog_version() {
   local log heading
-  log=$(git -C "$tmp" show "$1:CHANGELOG.md" 2>/dev/null </dev/null) || return 0
+  # A failed read (network, missing file) stops the script: skipping to an older commit
+  # would turn a fetch error into "no such release", or pick an older match.
+  log=$(git -C "$tmp" show "$1:CHANGELOG.md" 2>&1 </dev/null) || {
+    echo "cannot read CHANGELOG.md at $1: $log" >&2
+    return 1
+  }
   heading=$(grep -m1 -E '^## ' <<<"$log") || return 0
   sed -nE "s/^## \*\*[[:space:]]*($ver_re)[[:space:]]*\*\*.*/\1/p" <<<"$heading"
 }
@@ -57,6 +62,8 @@ for line in "${releases[@]}"; do
   sha=${line%% *}
   subject=${line#* }
   subject_version=$(sed -nE "s/^feat: release ($ver_re)( .*)?$/\1/p" <<<"$subject")
+  # --grep also matches body lines; only a release subject marks a release commit
+  [[ -n $subject_version ]] || continue
   version=$(changelog_version "$sha")
   if [[ -z $want ]]; then
     # The newest release commit decides; never fall back to an older one silently
