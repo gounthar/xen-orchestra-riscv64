@@ -245,18 +245,30 @@ jobs:
             title="Xen Orchestra $REF @ ${SHA:0:10} (riscv64, experimental)"; pre=(--prerelease)
             { echo; echo "Experimental: built from the upstream \`$REF\` branch or commit, not from a release. Not for production."; } >> notes.md
           fi
-          gh release delete "$TAG" -R "$GITHUB_REPOSITORY" -y --cleanup-tag 2>/dev/null || true
-          gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" "${pre[@]}" \
-            --title "$title" --notes-file notes.md \
-            "$name.tar.zst" "$name.tar.zst.sha256"
+          assets=("$name.tar.zst" "$name.tar.zst.sha256")
+          if ! gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" "${pre[@]}" \
+              --title "$title" --notes-file notes.md "${assets[@]}"
+          else
+            # A forced rebuild: upload the replacement as a draft under a temporary
+            # tag first, so a failed upload leaves the published release untouched.
+            # Only once it is complete is the old one deleted and the draft published
+            # under $TAG. If that last step fails, the draft keeps the build:
+            # publish it by hand with gh release edit <draft tag> --tag $TAG --draft=false.
+            tmp="$TAG-rebuild-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+            gh release create "$tmp" -R "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" "${pre[@]}" \
+              --title "$title" --notes-file notes.md "${assets[@]}"
+            gh release delete "$TAG" -R "$GITHUB_REPOSITORY" -y --cleanup-tag
+            gh release edit "$tmp" -R "$GITHUB_REPOSITORY" --tag "$TAG" --draft=false
+          fi
       - name: Delete releases older than 90 days
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           # Runs only after a successful release, and never touches the one just made.
           cutoff=$(date -u -d '90 days ago' +%s)
-          gh release list -R "$GITHUB_REPOSITORY" --limit 200 --json tagName,createdAt \
-            --jq '.[] | select(.tagName | startswith("riscv64-v")) | "\(.tagName) \(.createdAt)"' |
+          gh release list -R "$GITHUB_REPOSITORY" --limit 1000 --json tagName,createdAt \
+            --jq '.[] | select(.tagName | startswith("riscv64-v") or startswith("riscv64-exp-")) | "\(.tagName) \(.createdAt)"' |
           while read -r tag created; do
             [ "$tag" = "$TAG" ] && continue
             if [ "$(date -u -d "$created" +%s)" -lt "$cutoff" ]; then
