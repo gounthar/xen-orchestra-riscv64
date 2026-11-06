@@ -253,8 +253,9 @@ jobs:
             # A forced rebuild: upload the replacement as a draft under a temporary
             # tag first, so a failed upload leaves the published release untouched.
             # Only once it is complete is the old one deleted and the draft published
-            # under $TAG. If that last step fails, the draft keeps the build.
-            tmp="$TAG-rebuild-$GITHUB_RUN_ID"
+            # under $TAG. If that last step fails, the draft keeps the build:
+            # publish it by hand with gh release edit <draft tag> --tag $TAG --draft=false.
+            tmp="$TAG-rebuild-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
             gh release create "$tmp" -R "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" "${pre[@]}" \
               --title "$title" --notes-file notes.md "${assets[@]}"
             gh release delete "$TAG" -R "$GITHUB_REPOSITORY" -y --cleanup-tag
