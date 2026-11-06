@@ -267,7 +267,7 @@ jobs:
         run: |
           # Runs only after a successful release, and never touches the one just made.
           cutoff=$(date -u -d '90 days ago' +%s)
-          gh release list -R "$GITHUB_REPOSITORY" --limit 200 --json tagName,createdAt \
+          gh release list -R "$GITHUB_REPOSITORY" --limit 1000 --json tagName,createdAt \
             --jq '.[] | select(.tagName | startswith("riscv64-v") or startswith("riscv64-exp-")) | "\(.tagName) \(.createdAt)"' |
           while read -r tag created; do
             [ "$tag" = "$TAG" ] && continue
