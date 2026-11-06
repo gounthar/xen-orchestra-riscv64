@@ -24,6 +24,9 @@ on:
         description: 'Rebuild even if the release already exists'
         type: boolean
         default: false
+      ref:
+        description: 'Upstream branch or commit to build instead of a release; published as an experimental pre-release'
+        required: false
 
 permissions:
   contents: read
@@ -39,6 +42,8 @@ jobs:
       version: ${{ steps.find.outputs.version }}
       sha: ${{ steps.find.outputs.sha }}
       build: ${{ steps.find.outputs.build }}
+      tag: ${{ steps.find.outputs.tag }}
+      ref: ${{ steps.find.outputs.ref }}
     steps:
       - uses: actions/checkout@v7.0.1
       - id: find
@@ -46,20 +51,32 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           WANT: ${{ inputs.version }}
           FORCE: ${{ inputs.force }}
+          REF: ${{ inputs.ref }}
         run: |
-          # Not `read < <(...)`: a process substitution hides the script's exit code
-          out=$(scripts/detect-release.sh "$WANT")
-          read -r version sha subject <<<"$out"
-          echo "upstream release $version at $sha"
-          if [ "$subject" != "$version" ]; then
-            echo "::warning::upstream commit $sha says release $subject; CHANGELOG.md says $version, using $version"
+          if [ -n "$REF" ]; then
+            # A branch or commit, not a release: no CHANGELOG version, so the short sha
+            # names the build, and the release is an experimental pre-release
+            sha=$(gh api "repos/vatesfr/xen-orchestra/commits/$REF" --jq .sha)
+            version="exp-${sha:0:10}"
+            tag="riscv64-$version"
+            echo "upstream $REF at $sha"
+          else
+            # Not `read < <(...)`: a process substitution hides the script's exit code
+            out=$(scripts/detect-release.sh "$WANT")
+            read -r version sha subject <<<"$out"
+            echo "upstream release $version at $sha"
+            if [ "$subject" != "$version" ]; then
+              echo "::warning::upstream commit $sha says release $subject; CHANGELOG.md says $version, using $version"
+            fi
+            tag="riscv64-v$version"
           fi
           build=true
-          if gh release view "riscv64-v$version" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+          if gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
              && [ "$FORCE" != true ]; then
-            echo "riscv64-v$version already released"; build=false
+            echo "$tag already released"; build=false
           fi
-          { echo "version=$version"; echo "sha=$sha"; echo "build=$build"; } >> "$GITHUB_OUTPUT"
+          { echo "version=$version"; echo "sha=$sha"; echo "build=$build"
+            echo "tag=$tag"; echo "ref=$REF"; } >> "$GITHUB_OUTPUT"
 
   bindings:
     needs: detect
@@ -141,6 +158,8 @@ jobs:
     env:
       VERSION: ${{ needs.detect.outputs.version }}
       SHA: ${{ needs.detect.outputs.sha }}
+      TAG: ${{ needs.detect.outputs.tag }}
+      REF: ${{ needs.detect.outputs.ref }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -221,9 +240,14 @@ jobs:
 
           Community build, not supported by Vates.
           NOTES
-          gh release delete "riscv64-v$VERSION" -R "$GITHUB_REPOSITORY" -y --cleanup-tag 2>/dev/null || true
-          gh release create "riscv64-v$VERSION" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "Xen Orchestra $VERSION (riscv64)" --notes-file notes.md \
+          title="Xen Orchestra $VERSION (riscv64)"; pre=()
+          if [ -n "$REF" ]; then
+            title="Xen Orchestra $REF @ ${SHA:0:10} (riscv64, experimental)"; pre=(--prerelease)
+            { echo; echo "Experimental: built from the upstream \`$REF\` branch or commit, not from a release. Not for production."; } >> notes.md
+          fi
+          gh release delete "$TAG" -R "$GITHUB_REPOSITORY" -y --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" "${pre[@]}" \
+            --title "$title" --notes-file notes.md \
             "$name.tar.zst" "$name.tar.zst.sha256"
       - name: Delete releases older than 90 days
         env:
@@ -234,7 +258,7 @@ jobs:
           gh release list -R "$GITHUB_REPOSITORY" --limit 200 --json tagName,createdAt \
             --jq '.[] | select(.tagName | startswith("riscv64-v")) | "\(.tagName) \(.createdAt)"' |
           while read -r tag created; do
-            [ "$tag" = "riscv64-v$VERSION" ] && continue
+            [ "$tag" = "$TAG" ] && continue
             if [ "$(date -u -d "$created" +%s)" -lt "$cutoff" ]; then
               echo "deleting $tag (created $created)"
               gh release delete "$tag" -R "$GITHUB_REPOSITORY" -y --cleanup-tag
